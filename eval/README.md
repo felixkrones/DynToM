@@ -69,6 +69,8 @@ python analyze.py --model all --output results/summary.json
 
 The analyzer prints a Table 3 comparison with per-mental-state Understanding (U) and Transformation (T) accuracy, plus overall AVG, alongside the paper's reported values for Human, GPT-4o, and GPT-4-Turbo.
 
+**Note on metrics:** Only questions where the model provided a non-empty answer are included in accuracy calculations. If a model returns no response or an incomplete response (e.g. due to rate limits), those questions are excluded from the denominator rather than counted as wrong. Result files with no valid answers at all are not saved.
+
 ## File Structure
 
 ```

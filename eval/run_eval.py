@@ -192,8 +192,23 @@ PROVIDER_FUNCTIONS = {
 }
 
 
+def validate_answers(answers, expected=71):
+    """Check that answers dict has sufficient non-empty responses.
+
+    Returns True if at least `expected` questions have non-empty answers.
+    """
+    if not answers:
+        return False
+    answered = sum(1 for v in answers.values() if v and str(v).strip())
+    return answered >= expected
+
+
 def call_model(model_name, system_msg, user_msg, max_retries=5, delay=2):
-    """Call the appropriate model API with retry logic and rate limiting."""
+    """Call the appropriate model API with retry logic and rate limiting.
+
+    Retries on exceptions AND on empty/incomplete responses (e.g. Gemini
+    returning nothing when rate-limited instead of raising an error).
+    """
     provider, model_id = MODELS[model_name]
     call_fn = PROVIDER_FUNCTIONS[provider]
 
@@ -203,6 +218,19 @@ def call_model(model_name, system_msg, user_msg, max_retries=5, delay=2):
             # Rate limiting: pause between calls to avoid 429s
             if delay > 0:
                 time.sleep(delay)
+            # Check for empty/None responses (some providers fail silently)
+            if not result or not result.strip():
+                wait = 10 * (2 ** attempt)
+                logger.warning(
+                    "Attempt %d/%d for %s returned empty response. Retrying in %ds...",
+                    attempt + 1, max_retries, model_name, wait,
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(wait)
+                    continue
+                else:
+                    logger.error("All retries exhausted for %s (empty responses)", model_name)
+                    return None
             return result
         except Exception as e:
             wait = 10 * (2 ** attempt)  # 10s, 20s, 40s, 80s, 160s
@@ -227,11 +255,22 @@ def get_answer_path(model_name, trial_id):
     return os.path.join(model_dir, f"trial{trial_id}_answers.json")
 
 
-def run_single_trial(model_name, trial_id, delay=2):
+def run_single_trial(model_name, trial_id, delay=2, resume=True):
     """Run inference for a single trial. Returns True if successful."""
     answer_path = get_answer_path(model_name, trial_id)
-    if os.path.exists(answer_path):
-        return True  # Already done
+    if resume and os.path.exists(answer_path):
+        # Check that existing file has valid answers
+        try:
+            with open(answer_path, encoding="UTF-8") as f:
+                existing = json.load(f)
+            if validate_answers(existing):
+                return True  # Already done with valid answers
+            else:
+                logger.info("Trial %d [%s]: existing file has no valid answers, re-running", trial_id, model_name)
+                os.remove(answer_path)
+        except (json.JSONDecodeError, OSError):
+            logger.info("Trial %d [%s]: existing file is corrupt, re-running", trial_id, model_name)
+            os.remove(answer_path)
 
     # Check trial data exists
     story_path = os.path.join(DATA_DIR, f"trial{trial_id}", "story.json")
@@ -244,9 +283,18 @@ def run_single_trial(model_name, trial_id, delay=2):
     raw_response = call_model(model_name, system_msg, user_msg, delay=delay)
 
     if raw_response is None:
-        answers = {}
-    else:
-        answers = parse_json_response(raw_response)
+        logger.warning("Trial %d [%s]: no response after retries, skipping", trial_id, model_name)
+        return False
+
+    answers = parse_json_response(raw_response)
+
+    if not validate_answers(answers):
+        answered = sum(1 for v in answers.values() if v and str(v).strip())
+        logger.warning(
+            "Trial %d [%s]: only %d/71 valid answers, not saving",
+            trial_id, model_name, answered,
+        )
+        return False
 
     logger.info(
         "Trial %d [%s]: %d/%d questions answered",
@@ -265,6 +313,8 @@ def main():
     parser.add_argument("--start", type=int, default=50, help="Start trial ID (inclusive)")
     parser.add_argument("--end", type=int, default=1150, help="End trial ID (exclusive)")
     parser.add_argument("--delay", type=float, default=2, help="Seconds between API calls (rate limiting)")
+    parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True,
+                        help="Resume from previous runs, skipping completed trials (default: True)")
     args = parser.parse_args()
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -290,7 +340,7 @@ def main():
         logger.info("Found %d valid trials in range %d-%d", len(valid_trials), args.start, args.end)
 
         for trial_id in tqdm(valid_trials, desc=model_name):
-            run_single_trial(model_name, trial_id, delay=args.delay)
+            run_single_trial(model_name, trial_id, delay=args.delay, resume=args.resume)
 
         logger.info("=== Finished %s ===", model_name)
 

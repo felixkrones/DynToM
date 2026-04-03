@@ -90,6 +90,7 @@ def load_trial_results(model_name, trial_id):
 def compute_accuracy(answers, truth, question_ids):
     """Compute accuracy for a subset of question IDs.
 
+    Only counts questions where the model provided a non-empty answer.
     Returns (correct_count, total_count).
     """
     correct = 0
@@ -97,9 +98,12 @@ def compute_accuracy(answers, truth, question_ids):
     for q_id in question_ids:
         if q_id not in truth:
             continue
+        model_answer = answers.get(q_id, "")
+        # Skip questions with no answer provided
+        if not model_answer or not str(model_answer).strip():
+            continue
         total += 1
         true_answer = truth[q_id]["true answer"]
-        model_answer = answers.get(q_id, "")
         if model_answer == true_answer:
             correct += 1
     return correct, total
