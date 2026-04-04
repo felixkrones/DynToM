@@ -71,15 +71,42 @@ The analyzer prints a Table 3 comparison with per-mental-state Understanding (U)
 
 **Note on metrics:** Only questions where the model provided a non-empty answer are included in accuracy calculations. If a model returns no response or an incomplete response (e.g. due to rate limits), those questions are excluded from the denominator rather than counted as wrong. Result files with no valid answers at all are not saved.
 
+## Contamination Detection (CoDeC)
+
+Checks whether models may have been trained on DynToM benchmark data, using an adapted version of the CoDeC method ([Zawalski et al., 2025](https://arxiv.org/abs/2510.27055)).
+
+**How it works:** For each sampled trial, the model answers DynToM questions twice: once normally (baseline) and once with another DynToM trial prepended as an in-context example (context). If accuracy *drops* with context, it suggests the model memorized the data rather than generalizing — added context disrupts memorization patterns instead of helping.
+
+The CoDeC score is the percentage of trials where accuracy decreased with context.
+
+```bash
+# Run contamination check for a single model (default: 50 sampled trials)
+python contamination.py --model gpt-5.4
+
+# Run for all models
+python contamination.py --model all --num-samples 50 --delay 3
+```
+
+Cached baseline answers from previous evaluation runs are reused automatically. Use `--no-cache` to force fresh baseline runs.
+
+Results are saved to `results/contamination.json` and automatically included in the Table 3 output from `analyze.py` as a "CoDeC" column.
+
+**Interpreting the score:**
+- **>70%**: Likely contaminated — the model's performance degrades with context, suggesting memorization
+- **40-70%**: Inconclusive — could indicate partial contamination or dataset-specific effects
+- **<40%**: Likely not contaminated — the model benefits from context, indicating it is generalizing
+
 ## File Structure
 
 ```
 eval/
-  config.py       # Model registry, API keys, paths
-  run_eval.py     # Inference runner with prompt construction and response parsing
-  analyze.py      # Accuracy computation and Table 3 breakdown
-  results/        # Output directory (gitignored)
+  config.py          # Model registry, API keys, paths
+  run_eval.py        # Inference runner with prompt construction and response parsing
+  analyze.py         # Accuracy computation and Table 3 breakdown
+  contamination.py   # CoDeC contamination detection
+  results/           # Output directory (gitignored)
     {model_name}/
       trial{id}_answers.json
+    contamination.json
     eval.log
 ```

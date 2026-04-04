@@ -160,19 +160,30 @@ def analyze_model(model_name, start=50, end=1150):
     return results
 
 
+def load_contamination_results():
+    """Load CoDeC contamination results if available."""
+    path = os.path.join(RESULTS_DIR, "contamination.json")
+    if os.path.exists(path):
+        with open(path, encoding="UTF-8") as f:
+            return json.load(f)
+    return {}
+
+
 def format_table(all_results):
     """Format results as a markdown table matching Table 3 from the paper."""
+    contamination = load_contamination_results()
+
     header = (
         "| Model | Contexts | Belief U | Belief T | Emotion U | Emotion T | "
-        "Intention U | Intention T | Action U | Action T | AVG |"
+        "Intention U | Intention T | Action U | Action T | AVG | CoDeC |"
     )
-    sep = "|" + "|".join(["---"] * 11) + "|"
+    sep = "|" + "|".join(["---"] * 12) + "|"
 
     # Paper reference values
     paper_ref = {
-        "Human": "1100 | 83.8 | 77.6 | 89.5 | 78.7 | 79.0 | 73.8 | 76.7 | 76.3 | 77.7",
-        "GPT-4o (paper)": "1100 | 80.9 | 44.5 | 91.7 | 45.8 | 87.5 | 51.9 | 95.1 | 55.6 | 64.0",
-        "GPT-4-Turbo (paper)": "1100 | 63.5 | 32.3 | 74.7 | 33.9 | 71.3 | 35.5 | 80.5 | 36.2 | 47.6",
+        "Human": "1100 | 83.8 | 77.6 | 89.5 | 78.7 | 79.0 | 73.8 | 76.7 | 76.3 | 77.7 | -",
+        "GPT-4o (paper)": "1100 | 80.9 | 44.5 | 91.7 | 45.8 | 87.5 | 51.9 | 95.1 | 55.6 | 64.0 | -",
+        "GPT-4-Turbo (paper)": "1100 | 63.5 | 32.3 | 74.7 | 33.9 | 71.3 | 35.5 | 80.5 | 36.2 | 47.6 | -",
     }
 
     lines = [header, sep]
@@ -182,6 +193,9 @@ def format_table(all_results):
     lines.append(sep)
 
     for model_name, results in all_results.items():
+        codec = contamination.get(model_name, {})
+        codec_str = f"{codec['codec_score']}" if "codec_score" in codec else "-"
+
         row = (
             f"| {model_name} "
             f"| {results['context_count']} "
@@ -189,7 +203,7 @@ def format_table(all_results):
             f"| {results['emotion_U']} | {results['emotion_T']} "
             f"| {results['intention_U']} | {results['intention_T']} "
             f"| {results['action_U']} | {results['action_T']} "
-            f"| {results['all']} |"
+            f"| {results['all']} | {codec_str} |"
         )
         lines.append(row)
         if model_name == "gpt-4-turbo":
